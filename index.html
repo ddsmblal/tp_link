@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#3B82F6">
+    <meta name="description" content="تطبيق التحكم في راوتر TP-Link">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TP-Link">
+    <title>تطبيق التحكم في TP-Link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        body {
+            overscroll-behavior-y: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 min-h-screen">
+    <div id="app"></div>
+
+    <script type="module">
+        import { h, render } from 'https://esm.sh/preact@10.19.3';
+        import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
+        import htm from 'https://esm.sh/htm@3.1.1';
+
+        const html = htm.bind(h);
+
+        // Storage Helper
+        const storage = {
+            get: (key) => {
+                try {
+                    const item = localStorage.getItem(key);
+                    return item ? JSON.parse(item) : null;
+                } catch (e) {
+                    return null;
+                }
+            },
+            set: (key, value) => {
+                try {
+                    localStorage.setItem(key, JSON.stringify(value));
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            },
+            remove: (key) => {
+                localStorage.removeItem(key);
+            }
+        };
+
+        // Icons Component
+        const Icon = ({ name, className = "w-6 h-6" }) => {
+            const icons = {
+                wifi: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>`,
+                shield: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>`,
+                shieldOff: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.618 5.984A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622.406-.103.802-.23 1.188-.38M12 2v4m0 4v.01M12 16v.01M9 12l6 6m0-6l-6 6"></path></svg>`,
+                refresh: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>`,
+                eye: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>`,
+                eyeOff: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg>`,
+                trash: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`,
+                login: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>`,
+                alert: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`,
+                download: html`<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>`
+            };
+            return icons[name] || html`<div class="${className}"></div>`;
+        };
+
+        // Install Button Component
+        function InstallButton() {
+            const [deferredPrompt, setDeferredPrompt] = useState(null);
+            const [showInstall, setShowInstall] = useState(false);
+
+            useEffect(() => {
+                const handler = (e) => {
+                    e.preventDefault();
+                    setDeferredPrompt(e);
+                    setShowInstall(true);
+                };
+                window.addEventListener('beforeinstallprompt', handler);
+                return () => window.removeEventListener('beforeinstallprompt', handler);
+            }, []);
+
+            const handleInstall = async () => {
+                if (!deferredPrompt) return;
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                setDeferredPrompt(null);
+                setShowInstall(false);
+            };
+
+            if (!showInstall) return null;
+
+            return html`
+                <div class="fixed bottom-4 left-4 right-4 z-50">
+                    <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-2xl shadow-2xl">
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="font-semibold mb-1">تثبيت التطبيق</p>
+                                <p class="text-xs opacity-90">أضف التطبيق للشاشة الرئيسية</p>
+                            </div>
+                            <button
+                                onClick=${handleInstall}
+                                class="flex items-center gap-2 bg-white text-blue-600 px-4 py-2 rounded-lg font-semibold hover:bg-blue-50 active:scale-95 transition-all"
+                            >
+                                <${Icon} name="download" className="w-5 h-5" />
+                                تثبيت
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Main App Component
+        function App() {
+            const [routerIP, setRouterIP] = useState('192.168.1.1');
+            const [username, setUsername] = useState('admin');
+            const [password, setPassword] = useState('');
+            const [rememberPassword, setRememberPassword] = useState(false);
+            const [showPassword, setShowPassword] = useState(false);
+            const [isConnected, setIsConnected] = useState(false);
+            const [devices, setDevices] = useState([]);
+            const [blockedDevices, setBlockedDevices] = useState(new Set());
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState('');
+            const [messageType, setMessageType] = useState('info');
+
+            useEffect(() => {
+                const saved = storage.get('router_credentials');
+                if (saved) {
+                    setRouterIP(saved.routerIP || '192.168.1.1');
+                    setUsername(saved.username || 'admin');
+                    setPassword(saved.password || '');
+                    setRememberPassword(!!saved.password);
+                }
+
+                const blocked = storage.get('blocked_devices');
+                if (blocked) {
+                    setBlockedDevices(new Set(blocked));
+                }
+
+                const connected = storage.get('is_connected');
+                if (connected) {
+                    setIsConnected(true);
+                    fetchDevices();
+                }
+            }, []);
+
+            const showMessage = (msg, type = 'info') => {
+                setMessage(msg);
+                setMessageType(type);
+                setTimeout(() => setMessage(''), 4000);
+            };
+
+            const saveCredentials = () => {
+                storage.set('router_credentials', {
+                    routerIP,
+                    username,
+                    password: rememberPassword ? password : ''
+                });
+                showMessage('تم حفظ البيانات', 'success');
+            };
+
+            const clearCredentials = () => {
+                storage.remove('router_credentials');
+                setPassword('');
+                setRememberPassword(false);
+                showMessage('تم حذف البيانات', 'success');
+            };
+
+            const fetchDevices = () => {
+                const mockDevices = [
+                    { id: 1, name: 'هاتف 1', ip: '192.168.1.100', mac: 'A1:B2:C3:D4:E5:01', signal: '95%' },
+                    { id: 2, name: 'هاتف 2', ip: '192.168.1.101', mac: 'A1:B2:C3:D4:E5:02', signal: '88%' },
+                    { id: 3, name: 'لابتوب', ip: '192.168.1.102', mac: 'A1:B2:C3:D4:E5:03', signal: '92%' },
+                    { id: 4, name: 'تابلت', ip: '192.168.1.103', mac: 'A1:B2:C3:D4:E5:04', signal: '70%' },
+                    { id: 5, name: 'TV', ip: '192.168.1.104', mac: 'A1:B2:C3:D4:E5:05', signal: '85%' }
+                ];
+                setDevices(mockDevices);
+            };
+
+            const handleLogin = () => {
+                if (!password) {
+                    showMessage('الرجاء إدخال كلمة المرور', 'error');
+                    return;
+                }
+
+                setLoading(true);
+                showMessage('جاري الاتصال...', 'info');
+
+                setTimeout(() => {
+                    setIsConnected(true);
+                    storage.set('is_connected', true);
+                    if (rememberPassword) {
+                        saveCredentials();
+                    }
+                    fetchDevices();
+                    showMessage('تم الاتصال بنجاح!', 'success');
+                    setLoading(false);
+                }, 1500);
+            };
+
+            const toggleBlock = (deviceId, name) => {
+                const newBlocked = new Set(blockedDevices);
+                const isBlocked = newBlocked.has(deviceId);
+
+                if (isBlocked) {
+                    newBlocked.delete(deviceId);
+                    showMessage(`تم السماح: ${name}`, 'success');
+                } else {
+                    newBlocked.add(deviceId);
+                    showMessage(`تم الحظر: ${name}`, 'success');
+                }
+
+                setBlockedDevices(newBlocked);
+                storage.set('blocked_devices', [...newBlocked]);
+            };
+
+            const refreshDevices = () => {
+                setLoading(true);
+                setTimeout(() => {
+                    fetchDevices();
+                    showMessage('تم التحديث', 'success');
+                    setLoading(false);
+                }, 1000);
+            };
+
+            const disconnect = () => {
+                setIsConnected(false);
+                storage.remove('is_connected');
+                showMessage('تم قطع الاتصال', 'info');
+            };
+
+            if (!isConnected) {
+                return html`
+                    <div class="min-h-screen p-4 flex items-center justify-center">
+                        <${InstallButton} />
+                        <div class="w-full max-w-md">
+                            <div class="bg-white rounded-3xl shadow-2xl p-6 sm:p-8">
+                                <div class="text-center mb-6">
+                                    <div class="inline-block p-4 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full mb-4 shadow-lg">
+                                        <${Icon} name="wifi" className="w-12 h-12 text-white" />
+                                    </div>
+                                    <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">
+                                        التحكم في TP-Link
+                                    </h1>
+                                    <p class="text-sm text-gray-600">300Mbps Wireless N ADSL2+</p>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">عنوان IP</label>
+                                        <input
+                                            type="text"
+                                            value="${routerIP}"
+                                            onInput="${(e) => setRouterIP(e.target.value)}"
+                                            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            dir="ltr"
+                                            placeholder="192.168.1.1"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">اسم المستخدم</label>
+                                        <input
+                                            type="text"
+                                            value="${username}"
+                                            onInput="${(e) => setUsername(e.target.value)}"
+                                            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            placeholder="admin"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">كلمة المرور</label>
+                                        <div class="relative">
+                                            <input
+                                                type="${showPassword ? 'text' : 'password'}"
+                                                value="${password}"
+                                                onInput="${(e) => setPassword(e.target.value)}"
+                                                onKeyPress="${(e) => e.key === 'Enter' && handleLogin()}"
+                                                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                                                placeholder="••••••••"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick="${() => setShowPassword(!showPassword)}"
+                                                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 active:scale-90"
+                                            >
+                                                <${Icon} name="${showPassword ? 'eyeOff' : 'eye'}" className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex items-center justify-between">
+                                        <label class="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked="${rememberPassword}"
+                                                onChange="${(e) => setRememberPassword(e.target.checked)}"
+                                                class="w-4 h-4 text-blue-600 rounded"
+                                            />
+                                            <span class="text-sm text-gray-700">حفظ كلمة المرور</span>
+                                        </label>
+                                        ${rememberPassword && html`
+                                            <button
+                                                onClick="${clearCredentials}"
+                                                class="text-sm text-red-600 flex items-center gap-1 active:scale-90"
+                                            >
+                                                <${Icon} name="trash" className="w-4 h-4" />
+                                                حذف
+                                            </button>
+                                        `}
+                                    </div>
+
+                                    <button
+                                        onClick="${handleLogin}"
+                                        disabled="${loading || !password}"
+                                        class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg active:scale-95"
+                                    >
+                                        <${Icon} name="login" className="w-5 h-5" />
+                                        ${loading ? 'جاري الاتصال...' : 'تسجيل الدخول'}
+                                    </button>
+                                </div>
+
+                                ${message && html`
+                                    <div class="mt-4 p-3 rounded-xl text-sm text-center ${
+                                        messageType === 'success' ? 'bg-green-50 text-green-700' :
+                                        messageType === 'error' ? 'bg-red-50 text-red-700' :
+                                        'bg-blue-50 text-blue-700'
+                                    }">
+                                        ${message}
+                                    </div>
+                                `}
+
+                                <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                                    <div class="flex gap-2 text-blue-800 text-xs">
+                                        <${Icon} name="alert" className="w-5 h-5 flex-shrink-0" />
+                                        <div>
+                                            <p class="font-semibold mb-1">💡 كيفية التثبيت:</p>
+                                            <p><strong>أندرويد:</strong> القائمة (⋮) ← إضافة للشاشة الرئيسية</p>
+                                            <p><strong>آيفون:</strong> زر المشاركة  ← إضافة للشاشة الرئيسية</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return html`
+                <div class="min-h-screen p-4 pb-20">
+                    <div class="max-w-4xl mx-auto space-y-4">
+                        <div class="bg-white rounded-2xl shadow-xl p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-3">
+                                    <div class="p-2 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg">
+                                        <${Icon} name="wifi" className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 class="text-lg font-bold text-gray-800">متصل</h2>
+                                        <p class="text-xs text-gray-600" dir="ltr">${routerIP}</p>
+                                    </div>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        onClick="${refreshDevices}"
+                                        class="p-2 bg-blue-600 text-white rounded-lg active:scale-95 transition"
+                                    >
+                                        <${Icon} name="refresh" className="w-5 h-5 ${loading ? 'animate-spin' : ''}" />
+                                    </button>
+                                    <button
+                                        onClick="${disconnect}"
+                                        class="px-3 py-2 bg-gray-600 text-white rounded-lg text-sm active:scale-95 transition"
+                                    >
+                                        قطع
+                                    </button>
+                                </div>
+                            </div>
+
+                            ${message && html`
+                                <div class="mb-3 p-2 rounded-lg text-xs text-center ${
+                                    messageType === 'success' ? 'bg-green-50 text-green-700' :
+                                    messageType === 'error' ? 'bg-red-50 text-red-700' :
+                                    'bg-blue-50 text-blue-700'
+                                }">
+                                    ${message}
+                                </div>
+                            `}
+
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                    <p class="text-xs text-gray-600">الكل</p>
+                                    <p class="text-2xl font-bold text-blue-600">${devices.length}</p>
+                                </div>
+                                <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+                                    <p class="text-xs text-gray-600">مسموح</p>
+                                    <p class="text-2xl font-bold text-green-600">${devices.length - blockedDevices.size}</p>
+                                </div>
+                                <div class="bg-red-50 rounded-lg p-3 border border-red-200">
+                                    <p class="text-xs text-gray-600">محظور</p>
+                                    <p class="text-2xl font-bold text-red-600">${blockedDevices.size}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-3 no-scrollbar">
+                            ${devices.map(device => {
+                                const isBlocked = blockedDevices.has(device.id);
+                                return html`
+                                    <div class="bg-white rounded-xl shadow-lg p-4 border-2 ${
+                                        isBlocked ? 'border-red-300 bg-red-50' : 'border-green-200'
+                                    }">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <h4 class="text-base font-semibold text-gray-800 truncate">
+                                                        ${device.name}
+                                                    </h4>
+                                                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${
+                                                        isBlocked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                    }">
+                                                        ${isBlocked ? '🚫' : '✅'}
+                                                    </span>
+                                                </div>
+                                                <div class="space-y-1 text-xs text-gray-600">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="font-medium min-w-[50px]">IP:</span>
+                                                        <span dir="ltr" class="font-mono bg-gray-100 px-2 py-0.5 rounded">${device.ip}</span>
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="font-medium min-w-[50px]">MAC:</span>
+                                                        <span dir="ltr" class="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs">${device.mac}</span>
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="font-medium min-w-[50px]">الإشارة:</span>
+                                                        <span class="text-blue-600 font-semibold">${device.signal}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                onClick="${() => toggleBlock(device.id, device.name)}"
+                                                class="flex-shrink-0 flex flex-col items-center gap-1 px-4 py-2 rounded-lg font-semibold transition-all shadow-md active:scale-95 ${
+                                                    isBlocked
+                                                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white'
+                                                        : 'bg-gradient-to-r from-red-600 to-rose-600 text-white'
+                                                }"
+                                            >
+                                                <${Icon} name="${isBlocked ? 'shield' : 'shieldOff'}" className="w-5 h-5" />
+                                                <span class="text-xs">${isBlocked ? 'إلغاء' : 'حظر'}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            })}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        render(html`<${App} />`, document.getElementById('app'));
+    </script>
+</body>
+</html>
