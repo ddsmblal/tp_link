@@ -200,50 +200,229 @@
                 setDevices(mockDevices);
             };
 
-            const handleLogin = () => {
+            // جلب الأجهزة المتصلة من الراوتر الحقيقي
+            const fetchDevicesFromRouter = async () => {
+                try {
+                    const authString = btoa(`${username}:${password}`);
+                    
+                    // طلب قائمة الأجهزة المتصلة
+                    const response = await fetch(`http://${routerIP}/userRpm/AssignedIpAddrListRpm.htm`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Basic ${authString}`,
+                        },
+                        credentials: 'include',
+                    });
+
+                    if (response.ok) {
+                        const html = await response.text();
+                        const parsedDevices = parseDevicesFromHTML(html);
+                        
+                        if (parsedDevices.length > 0) {
+                            setDevices(parsedDevices);
+                            showMessage(`تم العثور على ${parsedDevices.length} جهاز متصل`, 'success');
+                        } else {
+                            // إذا لم نجد أجهزة، استخدم البيانات التجريبية
+                            fetchDevices();
+                        }
+                    } else {
+                        throw new Error('فشل جلب البيانات');
+                    }
+                } catch (error) {
+                    console.log('خطأ في جلب الأجهزة:', error);
+                    showMessage('سيتم استخدام بيانات تجريبية', 'info');
+                    fetchDevices();
+                }
+            };
+
+            // تحليل HTML للحصول على معلومات الأجهزة
+            const parseDevicesFromHTML = (html) => {
+                const devices = [];
+                try {
+                    // البحث عن جدول الأجهزة في HTML
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const rows = doc.querySelectorAll('table tr');
+                    
+                    rows.forEach((row, index) => {
+                        if (index === 0) return; // تخطي العنوان
+                        
+                        const cells = row.querySelectorAll('td');
+                        if (cells.length >= 3) {
+                            const mac = cells[0]?.textContent.trim();
+                            const ip = cells[1]?.textContent.trim();
+                            const name = cells[2]?.textContent.trim() || `جهاز ${index}`;
+                            
+                            if (mac && ip) {
+                                devices.push({
+                                    id: index,
+                                    name: name,
+                                    ip: ip,
+                                    mac: mac,
+                                    signal: 'N/A'
+                                });
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.log('خطأ في تحليل البيانات:', error);
+                }
+                
+                return devices;
+            };
+
+            const handleLogin = async () => {
                 if (!password) {
                     showMessage('الرجاء إدخال كلمة المرور', 'error');
                     return;
                 }
 
                 setLoading(true);
-                showMessage('جاري الاتصال...', 'info');
+                showMessage('جاري الاتصال بالراوتر...', 'info');
 
-                setTimeout(() => {
-                    setIsConnected(true);
-                    storage.set('is_connected', true);
-                    if (rememberPassword) {
-                        saveCredentials();
+                try {
+                    // محاولة الاتصال الحقيقي بالراوتر
+                    const authString = btoa(`${username}:${password}`);
+                    
+                    // طلب تسجيل الدخول
+                    const response = await fetch(`http://${routerIP}/userRpm/LoginRpm.htm?Save=Save`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Basic ${authString}`,
+                        },
+                        credentials: 'include',
+                    });
+
+                    if (response.ok || response.status === 0) {
+                        // نجح الاتصال
+                        setIsConnected(true);
+                        storage.set('is_connected', true);
+                        if (rememberPassword) {
+                            saveCredentials();
+                        }
+                        await fetchDevicesFromRouter();
+                        showMessage('تم الاتصال بنجاح!', 'success');
+                    } else {
+                        throw new Error('فشل تسجيل الدخول');
                     }
-                    fetchDevices();
-                    showMessage('تم الاتصال بنجاح!', 'success');
+                } catch (error) {
+                    console.log('خطأ في الاتصال:', error);
+                    showMessage('⚠️ تعذر الاتصال بالراوتر. سيتم استخدام الوضع التجريبي', 'error');
+                    
+                    // في حالة الفشل، استخدم البيانات التجريبية
+                    setTimeout(() => {
+                        setIsConnected(true);
+                        storage.set('is_connected', true);
+                        if (rememberPassword) {
+                            saveCredentials();
+                        }
+                        fetchDevices();
+                    }, 1000);
+                } finally {
                     setLoading(false);
-                }, 1500);
+                }
             };
 
-            const toggleBlock = (deviceId, name) => {
+            const toggleBlock = async (deviceId, name) => {
                 const newBlocked = new Set(blockedDevices);
                 const isBlocked = newBlocked.has(deviceId);
+                const device = devices.find(d => d.id === deviceId);
 
-                if (isBlocked) {
-                    newBlocked.delete(deviceId);
-                    showMessage(`تم السماح: ${name}`, 'success');
-                } else {
-                    newBlocked.add(deviceId);
-                    showMessage(`تم الحظر: ${name}`, 'success');
+                if (!device) return;
+
+                setLoading(true);
+
+                try {
+                    if (isBlocked) {
+                        // إلغاء الحظر
+                        await unblockDevice(device.mac);
+                        newBlocked.delete(deviceId);
+                        showMessage(`تم السماح: ${name}`, 'success');
+                    } else {
+                        // حظر الجهاز
+                        await blockDevice(device.mac);
+                        newBlocked.add(deviceId);
+                        showMessage(`تم الحظر: ${name}`, 'success');
+                    }
+
+                    setBlockedDevices(newBlocked);
+                    storage.set('blocked_devices', [...newBlocked]);
+                } catch (error) {
+                    console.log('خطأ في تطبيق الحظر:', error);
+                    showMessage('⚠️ تعذر تطبيق الحظر على الراوتر (وضع تجريبي)', 'error');
+                    
+                    // تطبيق الحظر محلياً فقط
+                    if (isBlocked) {
+                        newBlocked.delete(deviceId);
+                    } else {
+                        newBlocked.add(deviceId);
+                    }
+                    setBlockedDevices(newBlocked);
+                    storage.set('blocked_devices', [...newBlocked]);
+                } finally {
+                    setLoading(false);
                 }
-
-                setBlockedDevices(newBlocked);
-                storage.set('blocked_devices', [...newBlocked]);
             };
 
-            const refreshDevices = () => {
+            // حظر جهاز عبر MAC Address
+            const blockDevice = async (mac) => {
+                try {
+                    const authString = btoa(`${username}:${password}`);
+                    
+                    // إضافة MAC للقائمة السوداء
+                    const response = await fetch(`http://${routerIP}/userRpm/WlanMacFilterRpm.htm`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Basic ${authString}`,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        credentials: 'include',
+                        body: `macAddr=${mac}&filterMode=1&Save=Save`
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('فشل الحظر');
+                    }
+                } catch (error) {
+                    throw error;
+                }
+            };
+
+            // إلغاء حظر جهاز
+            const unblockDevice = async (mac) => {
+                try {
+                    const authString = btoa(`${username}:${password}`);
+                    
+                    // إزالة MAC من القائمة السوداء
+                    const response = await fetch(`http://${routerIP}/userRpm/WlanMacFilterRpm.htm`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Basic ${authString}`,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        credentials: 'include',
+                        body: `macAddr=${mac}&filterMode=0&Save=Save`
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('فشل إلغاء الحظر');
+                    }
+                } catch (error) {
+                    throw error;
+                }
+            };
+
+            const refreshDevices = async () => {
                 setLoading(true);
-                setTimeout(() => {
+                showMessage('جاري تحديث القائمة...', 'info');
+                
+                try {
+                    await fetchDevicesFromRouter();
+                } catch (error) {
                     fetchDevices();
-                    showMessage('تم التحديث', 'success');
-                    setLoading(false);
-                }, 1000);
+                }
+                
+                setLoading(false);
             };
 
             const disconnect = () => {
@@ -358,9 +537,11 @@
                                     <div class="flex gap-2 text-blue-800 text-xs">
                                         <${Icon} name="alert" className="w-5 h-5 flex-shrink-0" />
                                         <div>
-                                            <p class="font-semibold mb-1">💡 كيفية التثبيت:</p>
-                                            <p><strong>أندرويد:</strong> القائمة (⋮) ← إضافة للشاشة الرئيسية</p>
-                                            <p><strong>آيفون:</strong> زر المشاركة  ← إضافة للشاشة الرئيسية</p>
+                                            <p class="font-semibold mb-2">📱 كيفية التثبيت:</p>
+                                            <p class="mb-1"><strong>أندرويد:</strong> القائمة (⋮) ← إضافة للشاشة الرئيسية</p>
+                                            <p class="mb-2"><strong>آيفون:</strong> زر المشاركة  ← إضافة للشاشة الرئيسية</p>
+                                            <p class="text-amber-700 mt-2"><strong>⚠️ هام:</strong> يجب أن تكون متصلاً بنفس شبكة الراوتر</p>
+                                            <p class="text-amber-700"><strong>📡 ملاحظة:</strong> بسبب قيود CORS في المتصفحات، قد لا يعمل الاتصال المباشر. في هذه الحالة سيعمل التطبيق بالوضع التجريبي.</p>
                                         </div>
                                     </div>
                                 </div>
